@@ -1,0 +1,12 @@
+digraph tree {
+	"victim" [label="Victim", shape=circle]
+	"router1" [label="Router1", shape=circle]
+	"router2" [label="Router2", shape=circle]
+	"router3" [label="Router3", shape=circle]
+	"attacker1" [label="Attacker1", shape=circle]
+
+	"victim" -> "router1"
+	"victim" -> "router2"
+	"victim" -> "router3"
+	"router2" -> "attacker1"
+}

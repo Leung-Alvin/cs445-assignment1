@@ -1,0 +1,11 @@
+digraph {
+	victim [label=Victim]
+	router1 [label=Router1]
+	victim -> router1
+	router2 [label=Router2]
+	victim -> router2
+	attacker1 [label=Attacker1]
+	router2 -> attacker1
+	router3 [label=Router3]
+	victim -> router3
+}

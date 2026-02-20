@@ -1,0 +1,6 @@
+#networkx
+matplotlib
+treelib
+#graphviz
+numpy
+pandas

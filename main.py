@@ -1,16 +1,16 @@
-#import networkx as nx
+import networkx as nx
 import matplotlib.pyplot as plt
 import math
 from treelib import Tree
 import os
 import json
 import random
-random.seed(681)
+#random.seed(681)
 import copy
 import re
-import pandas as pd
+#import pandas as pd
 
-from graphviz import Source
+#from graphviz import Source
 
 class Packet:
     def __init__(self, payload, node, start, end, distance):
@@ -25,6 +25,17 @@ class Packet:
     def set_node(self,new_node):
         self.node = new_node
 
+    def set_start(self,new_start):
+        self.start = new_start
+
+    def set_end(self,new_end):
+        self.end = new_end
+
+    def set_distance(self,new_distance):
+        self.distance = new_distance
+
+    def get_distance(self):
+        return self.distance
 class Node:
     def __init__(self, ip_addr, role, packets, prediction,total):
         self.ip_addr = ip_addr
@@ -187,6 +198,48 @@ def get_path(tree,tree_height):
     return sorted_keys[0:tree_height-1]
 
             
+def edge_reconstruct(tree,tree_height,true_paths):
+    unshuffled = tree.get_node(tree.root).data.packets
+
+    packets = random.sample(unshuffled, len(unshuffled))
+    packets = tree.get_node(tree.root).data.packets
+
+    G =  nx.Graph()
+   # id = 2
+   # root_id = 2 
+   # G.create_node(f"Victim .{id}", root_id, data=Node(f"{id}","v", packets=[], prediction={},total= 0))
+   # id+=1
+
+    for packet in packets:
+        #if packet.payload =='a' and packet.start is not None:
+        if packet.start is not None:
+            if packet.distance == 0:
+                if packet.start in G:
+                    G.add_edge(packet.start,"Victim .2",weight=0)
+                else:
+                    G.add_node(packet.start)
+                    G.add_edge(packet.start,"Victim .2",weight=0)
+            else:
+                if packet.start in G and packet.end in G:
+                    G.add_edge(packet.start, packet.end, weight=packet.distance)
+                elif packet.start not in G and packet.end in G:
+                    G.add_node(packet.start)
+                    G.add_edge(packet.start, packet.end, weight=packet.distance)
+                elif packet.start in G and packet.end not in G:
+                    G.add_node(packet.end)
+                    G.add_edge(packet.start, packet.end, weight=packet.distance)
+                else:
+                    G.add_node(packet.start)
+                    G.add_node(packet.end)
+                    G.add_edge(packet.start, packet.end, weight=packet.distance)
+
+
+                    
+    #print(get_path(tree,tree_height))
+    tree.show()
+    nx.draw(G,with_labels=True)
+    plt.savefig("test.png")
+
 def simulation_round(tree,attack_rate,tree_height,protocol,marking_prob,normal_rate,true_paths):
     generate_leaf_packets(tree, attack_rate,normal_rate)
     for _ in range(tree_height):
@@ -200,7 +253,7 @@ def simulation_round(tree,attack_rate,tree_height,protocol,marking_prob,normal_r
     #print('\n')
     #return (total_packets, path)
 
-def edge_move_packets_up:
+def edge_move_packets_up(tree, p):
     for node in tree.all_nodes():
         if node.data.packets:
             marked_packets = node.data.packets
@@ -209,12 +262,17 @@ def edge_move_packets_up:
                 for packet in node.data.packets:
                     #print(packet)
                     if packet is not None:
+                        copied_packet = copy.deepcopy(packet)
                         if random.random() < p:
-                            copied_packet = copy.deepcopy(packet)
-                            copied_packet.set_node(node.tag)
+                            copied_packet.set_start(node.tag)
+                            copied_packet.set_distance(0)
                             marked_packets.append(copied_packet)
                         else:
-                            marked_packets.append(packet)
+                            if copied_packet.get_distance() == 0:
+                                copied_packet.set_end(node.tag)
+
+                            copied_packet.set_distance(copied_packet.get_distance()+1)
+                            marked_packets.append(copied_packet)
             orig = tree.parent(node.identifier).data.packets
             merged = orig + marked_packets
             shuffled = random.sample(merged,len(merged))
@@ -223,9 +281,14 @@ def edge_move_packets_up:
             tree.parent(node.identifier).data.packets = shuffled
             node.data.packets = []
 
-def edge_simulation_round(tree,attack_rate,tree_height,protocol,marking_prob,normal_rate,true_paths)
+def edge_simulation_round(tree,attack_rate,tree_height,protocol,marking_prob,normal_rate,true_paths):
     generate_leaf_packets(tree,attack_rate,normal_rate)
 
+    for _ in range(tree_height):
+        edge_move_packets_up(tree,marking_prob)
+        display_node_data(tree)
+    edge_reconstruct(tree, tree_height,true_paths)
+    tree.get_node(tree.root).data.packets = []
 
 def path_to_root(tree, node_id):
     path = []
@@ -374,7 +437,7 @@ def es_main_single_attack():
         cs = []
         for p in ps:
             avg = []
-            for i in range(10):
+            for i in range(1):
                 tree = generate_treelib_tree(tree_height, branching_factor, attacker_count=attacker_count, normal_count=normal_count )
                 attacker_ids = get_attacker_ids(tree)
                 true_paths = []
@@ -384,13 +447,14 @@ def es_main_single_attack():
                 round = 0
                 total = 0
                 prediction=[]
-                while(prediction not in true_paths):
-                    #print('total before',total)
-                    simulation_round(tree,x,tree_height,protocol,p,normal_rate,true_paths)
-                    prediction = get_path(tree,tree_height) 
-                    total += tree.get_node(tree.root).data.total
-                    #print('total after', total)
-                avg.append(total)
+                edge_simulation_round(tree,x,tree_height,protocol,p,normal_rate,true_paths)
+               # while(prediction not in true_paths):
+               #     #print('total before',total)
+               #     edge_simulation_round(tree,x,tree_height,protocol,p,normal_rate,true_paths)
+               #     prediction = get_path(tree,tree_height) 
+               #     total += tree.get_node(tree.root).data.total
+               #     #print('total after', total)
+               # avg.append(total)
             average = sum(avg)/len(avg)
             cs.append(math.log(average))
         values.append(cs)
@@ -408,4 +472,5 @@ def es_main_single_attack():
     plt.clf()
 if __name__ == "__main__":
     #ns_main_single_attack()
-    ns_main_double_attack()
+    #ns_main_double_attack()
+    es_main_single_attack()

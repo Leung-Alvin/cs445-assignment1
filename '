@@ -6,21 +6,13 @@ from treelib import Tree
 import os
 import json
 import random
-#Random seed is placed to create consistent results. Can be changed or commented out to see if results differ!
 random.seed(681)
 import copy
 import re
+#import pandas as pd
 
-#Global variables for the configs. Modify for different tree and experimental complexity
-tree_height = 6 
-branching_factor = 3
-normal_rate = 10 
-ps = [0.2,0.4,0.5,0.6,0.8]
-xs = [10,100,1000]
+#from graphviz import Source
 
-
-
-#Packet class represents the packets used for both algorithms, holding fields for both (ex:node, start, end, and distance).
 class Packet:
     def __init__(self, payload, node, start, end, distance):
         self.payload = payload
@@ -30,8 +22,7 @@ class Packet:
         self.distance = distance
     def __str__(self):
         return f"{self.payload}, {self.node}, {self.start}, {self.end}, {self.distance}"
-
-#modifier functions, deprecated due to the ability to set values directly
+    
     def set_node(self,new_node):
         self.node = new_node
 
@@ -46,10 +37,6 @@ class Packet:
 
     def get_distance(self):
         return self.distance
-
-
-#Node class represents the nodes for both algorithms, holding important information for various roles (victims, attackers, normal users, and routers). However, some roles will not be using certain fields.
-#Certain fields like prediction, graph, and total are reserved for the victims, while ip address is used by all roles
 class Node:
     def __init__(self, ip_addr, role, packets, prediction,total, graph):
         self.ip_addr = ip_addr
@@ -62,12 +49,10 @@ class Node:
     def __str__(self):
         return f"{self.ip_addr} ({self.role})"
 
-#Generate packets for attacker and normal nodes. Attacker nodes have higher num_packets, which yield larger amounts of packets for the attacker nodes to send out for the DoS attack.
     def generate_packets(self,num_packets):
         copy = Packet(self.role,None,None,None,0)
         self.packets = [Packet(self.role,None,None,None,0) for _ in range(num_packets)]
 
-#get_counts is useful for the node sampling algorithm in order debugging and counting the number of packets that reach the victim. Not used in final code.
     def get_counts(self):
         attack_count = 0 
         normal_count = 0 
@@ -82,18 +67,12 @@ class Node:
                 router_count+=1
 
         return {"a":attack_count,"n":normal_count, "r":router_count}
-
-#total_packets is used to calculate the number packets that are needed to converge
     def total_packets(self):
         return self.total
 
 
 
 
-#Generates random router trees with the provided parameters for the experiments as each experiment requires 10 trials.
-#All trees root at Victim with address .2
-#Leaves are randomly chosen to be attackers or normal users via the attacker count and normal count.
-#Tree is pruned afterward to get rid of paths with no attackers or normal users to reduce tree bloat
 def generate_treelib_tree(max_height, branching_factor=2,attacker_count=0,normal_count=1):
     tree = Tree()
     id = 2
@@ -115,8 +94,14 @@ def generate_treelib_tree(max_height, branching_factor=2,attacker_count=0,normal
     leaf_nodes = [node for node in tree.all_nodes() if node.is_leaf()]
     random.shuffle(leaf_nodes)
     for i in range(attacker_count):
+        # print("tag ",leaf_nodes[i].tag)
+        # print("identifier ",leaf_nodes[i].identifier)
+        # print("data ", leaf_nodes[i].data.role)
         leaf_nodes[i].tag = leaf_nodes[i].tag.replace("Router", "Attacker")
         leaf_nodes[i].data.role = "a"
+        #print("tag ",leaf_nodes[i].tag)
+        #print("identifier ",leaf_nodes[i].identifier)
+        #print("data ", leaf_nodes[i].data.role)
     for i in range(normal_count):
         leaf_nodes[i+attacker_count].tag = leaf_nodes[i+attacker_count].tag.replace("Router","Normal")
         leaf_nodes[i+attacker_count].data.role = "n"
@@ -124,6 +109,13 @@ def generate_treelib_tree(max_height, branching_factor=2,attacker_count=0,normal
         if node.data.role == 'r':
             node.tag = node.tag.replace("Router", "Delete")
             node.data.role = "d"
+   # for node in leaf_nodes:
+   #     print("tag",node.tag)
+   #     print("identifier",node.identifier)
+   #     print("data",node.data.ip_addr)
+    #for node in list(tree.all_nodes()):
+    #    if "Delete" in node.tag:
+    #        tree.remove_node(node.identifier)
     leaf_nodes = [node for node in tree.all_nodes() if node.is_leaf()]
     targets = [x.identifier for x in leaf_nodes if 'Attacker' in x.tag or 'Normal' in x.tag]
     nodes_to_keep = set()
@@ -141,7 +133,6 @@ def generate_treelib_tree(max_height, branching_factor=2,attacker_count=0,normal
                 pass
     return tree
 
-#Debugging function to display all data in a tree, which include what packets each nodes are holding. Not used in the final implementation
 def display_node_data(tree):
     for node in tree.all_nodes():
         packets = node.data.packets
@@ -150,9 +141,6 @@ def display_node_data(tree):
             print(packet)
 
 
-#Forces all leaf nodes, which are either normal or attacker nodes, to generate packets, with attackers having an increased packet normal_rate
-#Attacker's rate is rate * normal rate or rate times more than a normal user.
-#Attackers mark their packets with an 'a', while a normal user marks their packets with an 'n' for debugging purposes and error checking purposes
 def generate_leaf_packets(tree,rate,normal_rate):
     normal_rate = normal_rate
     attacker_rate = normal_rate*rate
@@ -163,10 +151,6 @@ def generate_leaf_packets(tree,rate,normal_rate):
         elif node.data.role == "n":
             node.data.generate_packets(num_packets=normal_rate)
 
-#Forces all nodes to send their packets upward (all nodes except Victim).
-#Leaf nodes send their packets to their parent node (a router), and all routers to their parent routers.
-#If the node is a router, they also mark the packets with probability p before sending packets upward.
-#All packets received have their order randomized to simulate unpredictable proccessing speeds and order
 def move_packets_up(tree, p):
     for node in tree.all_nodes():
         if node.data.packets:
@@ -190,12 +174,9 @@ def move_packets_up(tree, p):
             tree.parent(node.identifier).data.packets = shuffled
             node.data.packets = []
             
-#Deprecated function that is no longer needed
-
-#Reconstruction algorithm for node sampling. Only occurs when victim receives packets it must process.
-#Victim appends or increments entries in its dictionary of nodes for each packet.
-#After every packet, the victim tries to guess the attack path and compares it with the true path (victim cannot see the attack path)
-#Victim guesses by running get_path, which yields a path based on its existing dictionary of nodes.
+def all_paths_to_leaves_undirected(G,root):
+    leaves = [n for n in G.nodes() if G.degree(n) == 1 and n!= root]
+    return [nx.shortest_path(G,root,leaf) for leaf in leaves]
 
 def reconstruct(tree,tree_height,true_paths):
     unshuffled = tree.get_node(tree.root).data.packets
@@ -210,41 +191,23 @@ def reconstruct(tree,tree_height,true_paths):
                 tree.get_node(tree.root).data.prediction[packet.node]+=1 
             else:
                 tree.get_node(tree.root).data.prediction[packet.node]=1 
-        tree.get_node(tree.root).data.total+=1
+            tree.get_node(tree.root).data.total+=1
         if get_path(tree,tree_height) in true_paths:
             break
     tree.show()
     print(get_path(tree,tree_height))
 
 
-#Gets the path from reading the node table of the Victim.
-#Sorts the dictionary in descending order to find a plausible path before formatting into a readable list.
 def get_path(tree,tree_height):
     dictionary = tree.get_node(tree.root).data.prediction
     sorted_keys = sorted(dictionary, key=dictionary.get, reverse=True)
     return sorted_keys[0:tree_height-1]
 
-#Compares two lists of lists to see if their contents are the same. This is useful for edge sampling as the true paths are lists of paths, and ordering of the exterior paths could cause errors.
 def equal_lists_of_lists(a,b):
     normalize = lambda lst: Counter(tuple(sorted(x)) for x in lst)
     return normalize(a) == normalize(b)
 
-#Gets the path from a trimmed graph for Edge Sampling and compares it with the true path for correctness.
-def check_for_match(tree,tree_height,true_paths,G):
-    edges_with_data = list(G.edges(data="weight"))
-    for edge in edges_with_data:
-        if nx.has_path(G, edge[0], "Victim .2"):
-            distance_from_victim = nx.shortest_path_length(G,edge[0],"Victim .2", weight="weight")
-        else:
-            G.remove_edge(edge[0],edge[1])
-    root = "Victim .2"
-    leaves = [n for n in G.nodes() if G.degree(n) == 1 and n != root]
-    paths = [nx.shortest_path(G, root, leaf)[1:] for leaf in leaves]
-    return equal_lists_of_lists(paths,true_paths)
 
-#Reconstruct function for Edge Sampling. A key difference is the creation of a graph instead of using a dictionary.
-#Edges are added and trimmed according to the Edge Sampling Algorithm.
-#Returns the predicted path for the iteration via check for match
 def edge_reconstruct(tree,tree_height,true_paths):
     unshuffled = tree.get_node(tree.root).data.packets
 
@@ -252,10 +215,10 @@ def edge_reconstruct(tree,tree_height,true_paths):
     packets = tree.get_node(tree.root).data.packets
 
     if tree.get_node(tree.root).data.graph is None:
-        G =  nx.Graph()
+        G =  nx.MultiGraph()
 
     else:
-        G = tree.get_node(tree.root).data.graph
+        G = copy.deepcopy(tree.get_node(tree.root).data.graph)
    # id = 2
    # root_id = 2 
    # G.create_node(f"Victim .{id}", root_id, data=Node(f"{id}","v", packets=[], prediction={},total= 0))
@@ -284,29 +247,35 @@ def edge_reconstruct(tree,tree_height,true_paths):
                     G.add_node(packet.start)
                     G.add_node(packet.end)
                     G.add_edge(packet.start, packet.end, weight=packet.distance)
-            if check_for_match(tree,tree_height,true_paths,G):
-                break
-        tree.get_node(tree.root).data.total+=1
+    edges_with_data = list(G.edges(data="weight"))
+    for edge in edges_with_data:
+        if nx.has_path(G, edge[0], "Victim .2"):
+            distance_from_victim = nx.shortest_path_length(G,edge[0],"Victim .2", weight="weight")
+            if distance_from_victim != edge[2]:
+                G.remove_edge(edge[0],edge[1])
+        else:
+            G.remove_edge(edge[0],edge[1])
+
+
+
+
+                    
+    #print(get_path(tree,tree_height))
+    G.remove_nodes_from(list(nx.isolates(G)))
     tree.show()
-    #pos = nx.spring_layout(G)
-    tree.get_node(tree.root).data.graph = G
-    #nx.draw(G,pos,with_labels=True,font_size=12)
+    pos = nx.spring_layout(G)
+    nx.draw(G,pos,with_labels=True,font_size=12)
     #nx.draw(G,pos,font_size=12)
-    #edge_labels = nx.get_edge_attributes(G, "weight")
-    #nx.draw_networkx_edge_labels(G,pos, edge_labels = edge_labels)
-    #tree.get_node(tree.root).data.graph = G
-    root = "Victim .2"
-    leaves = [n for n in G.nodes() if G.degree(n) == 1 and n != root]
-    paths = [nx.shortest_path(G, root, leaf)[1:] for leaf in leaves]
-    #paths = list(nx.dfs_tree(G, source="Victim .2"))[1:]
-    return paths
+    edge_labels = nx.get_edge_attributes(G, "weight")
+    nx.draw_networkx_edge_labels(G,pos, edge_labels = edge_labels)
+    plt.savefig("test.png")
+    tree.get_node(tree.root).data.graph = G
+    paths = list(nx.dfs_tree(G, source="Victim .2"))
+    print("prediction",paths)
+    print("truth",true_paths)
+    print(equal_lists_of_lists(paths,true_paths)
     
 
-#Simulation round for node sampling. This is only used for node sampling.
-#First, it generates leaf packets for attackers and normal users.
-#Afterwards, it sends the packets to the victim.
-#The victim analyzes and reconstructs with the packets.
-#Afterwards, the victim clears its packet cache and updates its dictionary.
 def simulation_round(tree,attack_rate,tree_height,protocol,marking_prob,normal_rate,true_paths):
     generate_leaf_packets(tree, attack_rate,normal_rate)
     for _ in range(tree_height):
@@ -320,10 +289,6 @@ def simulation_round(tree,attack_rate,tree_height,protocol,marking_prob,normal_r
     #print('\n')
     #return (total_packets, path)
 
-#This function moves the packets up the line from router to router or leaf to router.
-#However, this function is only used for Edge Sampling as its marking algorithm is different than that for Node Sampling.
-#Different fields are updated on the packet (start, distance, and end).
-#Otherwise, functions are similar.
 def edge_move_packets_up(tree, p):
     for node in tree.all_nodes():
         if node.data.packets:
@@ -352,21 +317,15 @@ def edge_move_packets_up(tree, p):
             tree.parent(node.identifier).data.packets = shuffled
             node.data.packets = []
 
-#Edge Sampling simulation round, which is only used for Edge Sampling.
-#Requires a different function due to different outputs from the graph analysis.
-#Otherwise, it behaves the same: generate leaves, send packets up to victim, and victim analyzes.
 def edge_simulation_round(tree,attack_rate,tree_height,protocol,marking_prob,normal_rate,true_paths):
     generate_leaf_packets(tree,attack_rate,normal_rate)
 
     for _ in range(tree_height):
         edge_move_packets_up(tree,marking_prob)
         #display_node_data(tree)
-    paths = edge_reconstruct(tree, tree_height,true_paths)
+    edge_reconstruct(tree, tree_height,true_paths)
     tree.get_node(tree.root).data.packets = []
-    return paths
 
-#Given a tree and a target ID, the function finds the direct path from target to root. This is used in the function to find the true attack paths.
-#The found paths are used for comparison with the experimental predictions.
 def path_to_root(tree, node_id):
     path = []
     node = tree.get_node(node_id)
@@ -380,17 +339,35 @@ def path_to_root(tree, node_id):
         return_list.append('Router .'+str(item))
     return return_list
 
-#Obtains the attackers in the router tree by looking for their "hidden" (to the algorithms) attacker tag.
 def get_attacker_ids (tree):
     return [x.identifier for x in tree.all_nodes() if "Attacker" in x.tag]
-
-#Runs the simulation for Node Sampling versus a Single Attacker.
-#Performs 10 experiments for a given x and p and takes an average of the 10 experiments.
-#Runs experiments until convergence occurs (where the predicted path is the same as the true path)
-#Takes the log of the number of packets needed for convergence and graphs it out in Matplotlib.
 def ns_main_single_attack():
+
+    #attacker_count = input("Enter number of attackers: ")
+    #attacker_count = int(attacker_count)    
+    #if attacker_count > 3:
+    #    print("Too many attackers.")
+    #    return 
+    #marking_prob = input("Enter probability of marking: ")
+    #marking_prob = float(marking_prob)
+    #if marking_prob > 1 or marking_prob < 0:
+    #    print("Bad probability.")
+    #    return
+
+    #attacker_rate = input("Enter attack rate: ")
+    #attack_rate = float(rate)
+    
+    protocol = 'ns'
+    tree_height = 6 
+    branching_factor = 3
     attacker_count = 1 
+    marking_prob = 0.2
     normal_count = 1
+    normal_rate = 10 
+    ps = [0.05,0.1,0.15,0.2,0.25,0.3,0.35,0.4,0.45,0.5,0.55,0.6,0.65,0.7,0.75,0.8,0.85,0.9,0.95]
+    xs = [10,100,1000]
+
+
     values = []
     for x in xs:
         cs = []
@@ -410,7 +387,6 @@ def ns_main_single_attack():
                     #print('total before',total)
                     simulation_round(tree,x,tree_height,protocol,p,normal_rate,true_paths)
                     prediction = get_path(tree,tree_height) 
-                    print('prediction',prediction)
                     total += tree.get_node(tree.root).data.total
                     #print('total after', total)
                 avg.append(total)
@@ -419,6 +395,7 @@ def ns_main_single_attack():
         values.append(cs)
 
 
+    print(values)
     plt.plot(ps,values[0], label="10")
     plt.plot(ps,values[1], label="100")
     plt.plot(ps, values[2], label="1000")
@@ -426,16 +403,21 @@ def ns_main_single_attack():
     plt.ylabel("Log(Num Packets)")
     plt.title("Log(Number of Packets) vs Probability Node Sampling")
     plt.legend()
-    plt.show()
+    plt.savefig("ns_sa.png")
     plt.clf()
 
-#Runs the simulation for Node Sampling versus Double Attackers.
-#Performs 10 experiments for a given x and p and takes an average of the 10 experiments.
-#Runs experiments until convergence occurs (where the predicted path is the same as the true path)
-#NOTE: This algorithm does not converge due to the interactions between multiple attackers and Node Sampling.
 def ns_main_double_attack():
+    protocol = 'ns'
+    tree_height = 6 
+    branching_factor = 3
     attacker_count = 2 
+    marking_prob = 0.2
     normal_count = 1
+    normal_rate = 10 
+    ps = [0.05,0.1,0.15,0.2,0.25,0.3,0.35,0.4,0.45,0.5,0.55,0.6,0.65,0.7,0.75,0.8,0.85,0.9,0.95]
+    xs = [10,100,1000]
+
+
     values = []
     for x in xs:
         cs = []
@@ -455,7 +437,6 @@ def ns_main_double_attack():
                     #print('total before',total)
                     simulation_round(tree,x,tree_height,protocol,p,normal_rate,true_paths)
                     prediction = get_path(tree,tree_height) 
-                    print('prediction',prediction)
                     total += tree.get_node(tree.root).data.total
                     #print('total after', total)
                 avg.append(total)
@@ -464,6 +445,7 @@ def ns_main_double_attack():
         values.append(cs)
 
 
+    print(values)
     plt.plot(ps,values[0], label="10")
     plt.plot(ps,values[1], label="100")
     plt.plot(ps, values[2], label="1000")
@@ -471,71 +453,27 @@ def ns_main_double_attack():
     plt.ylabel("Log(Num Packets)")
     plt.title("Log(Number of Packets) vs Probability Node Sampling")
     plt.legend()
-    plt.show()
+    plt.savefig("ns_da.png")
     plt.clf()
 
-#Runs the simulation for Edge Sampling versus a Single Attacker.
-#Performs 10 experiments for a given x and p and takes an average of the 10 experiments.
-#Runs experiments until convergence occurs (where the predicted path is the same as the true path)
-#Takes the log of the number of packets needed for convergence and graphs it out in Matplotlib.
 def es_main_single_attack():
-    attacker_count = 1 
-    normal_count = 1
-    values = []
-    for x in xs:
-        cs = []
-        for p in ps:
-            avg = []
-            for i in range(10):
-                tree = generate_treelib_tree(tree_height, branching_factor, attacker_count=attacker_count, normal_count=normal_count )
-                attacker_ids = get_attacker_ids(tree)
-                true_paths = []
-                for attacker_id in attacker_ids:
-                    true_paths.append(path_to_root(tree,attacker_id))
-                #print("true_paths",true_paths)
-                round = 0
-                total = 0
-                prediction=[]
-               #edge_simulation_round(tree,x,tree_height,protocol,p,normal_rate,true_paths)
-                cond = equal_lists_of_lists(prediction,true_paths)
-                while(not cond):
-                    #print('total before',total)
-                    prediction = edge_simulation_round(tree,x,tree_height,protocol,p,normal_rate,true_paths)
-                    total += tree.get_node(tree.root).data.total
-                    print('prediction',prediction)
-                    print('truth',true_paths)
-                    cond = equal_lists_of_lists(prediction,true_paths)
-                    #print('total after', total)
-                avg.append(total)
-            average = sum(avg)/len(avg)
-            cs.append(math.log(average))
-        values.append(cs)
-
-
-    plt.plot(ps,values[0], label="10")
-    plt.plot(ps,values[1], label="100")
-    plt.plot(ps, values[2], label="1000")
-    plt.xlabel("Probability")
-    plt.ylabel("Log(Num Packets)")
-    plt.title("Log(Number of Packets) vs Probability Edge Sampling")
-    plt.legend()
-    plt.show()
-    plt.clf()
-
-#Runs the simulation for Edge Sampling versus Double Attackers.
-#Performs 10 experiments for a given x and p and takes an average of the 10 experiments.
-#Runs experiments until convergence occurs (where the predicted path is the same as the true path)
-#Takes the log of the number of packets needed for convergence and graphs it out in Matplotlib.
-
-def es_main_double_attack():
+    protocol = 'es'
+    tree_height = 6 
+    branching_factor = 3
     attacker_count = 2 
+    marking_prob = 0.2
     normal_count = 1
+    normal_rate = 10 
+    ps = [0.05,0.1,0.15,0.2,0.25,0.3,0.35,0.4,0.45,0.5,0.55,0.6,0.65,0.7,0.75,0.8,0.85,0.9,0.95]
+    xs = [10,100,1000]
+
+
     values = []
     for x in xs:
         cs = []
         for p in ps:
             avg = []
-            for i in range(10):
+            for i in range(1):
                 tree = generate_treelib_tree(tree_height, branching_factor, attacker_count=attacker_count, normal_count=normal_count )
                 attacker_ids = get_attacker_ids(tree)
                 true_paths = []
@@ -545,41 +483,30 @@ def es_main_double_attack():
                 round = 0
                 total = 0
                 prediction=[]
-               #edge_simulation_round(tree,x,tree_height,protocol,p,normal_rate,true_paths)
-                cond = equal_lists_of_lists(prediction,true_paths)
-                while(not cond):
-                    #print('total before',total)
-                    prediction = edge_simulation_round(tree,x,tree_height,protocol,p,normal_rate,true_paths)
-                    total += tree.get_node(tree.root).data.total
-                    print('prediction',prediction)
-                    print('truth',true_paths)
-                    cond = equal_lists_of_lists(prediction,true_paths)
-                    #print(cond)
-                    #print('total after', total)
-                avg.append(total)
+                edge_simulation_round(tree,x,tree_height,protocol,p,normal_rate,true_paths)
+               # while(prediction not in true_paths):
+               #     #print('total before',total)
+               #     edge_simulation_round(tree,x,tree_height,protocol,p,normal_rate,true_paths)
+               #     prediction = get_path(tree,tree_height) 
+               #     total += tree.get_node(tree.root).data.total
+               #     #print('total after', total)
+               # avg.append(total)
             average = sum(avg)/len(avg)
             cs.append(math.log(average))
         values.append(cs)
+
+
+    print(values)
     plt.plot(ps,values[0], label="10")
     plt.plot(ps,values[1], label="100")
     plt.plot(ps, values[2], label="1000")
     plt.xlabel("Probability")
     plt.ylabel("Log(Num Packets)")
-    plt.title("Log(Number of Packets) vs Probability Edge Sampling")
+    plt.title("Log(Number of Packets) vs Probability Node Sampling")
     plt.legend()
-    plt.show()
+    plt.savefig("ns_da.png")
     plt.clf()
-
-#Main function to run all the experiments based on the user input. To modify parameters, simply modify the global variables at the top of the program.
 if __name__ == "__main__":
-    protocol = input("Enter test required (nssa,nsda,essa,esda): ")
-    if protocol == "nssa":
-        ns_main_single_attack()
-    elif protocol == "nsda":
-        ns_main_double_attack()
-    elif protocol == "essa":
-        es_main_single_attack()
-    elif protocol == "esda":
-        es_main_double_attack()
-    else:
-        print("Invalid Input. Please Try Again")
+    #ns_main_single_attack()
+    #ns_main_double_attack()
+    es_main_single_attack()

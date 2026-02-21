@@ -1,6 +1,3 @@
-#networkx
+networkx
 matplotlib
 treelib
-#graphviz
-numpy
-pandas
